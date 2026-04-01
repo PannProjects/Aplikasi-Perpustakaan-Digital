@@ -4,8 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Buku;
 use App\Models\Peminjaman;
-use Illuminate\Http\Request;
 use Carbon\Carbon;
+use Illuminate\Http\Request;
 
 class PeminjamanController extends Controller
 {
@@ -13,6 +13,7 @@ class PeminjamanController extends Controller
     {
         $buku = Buku::all();
         $peminjaman = Peminjaman::where('UserID', auth()->id())->with('buku')->get();
+
         return view('peminjaman.index', compact('buku', 'peminjaman'));
     }
 
@@ -66,6 +67,7 @@ class PeminjamanController extends Controller
         }
 
         $peminjaman = $query->get();
+
         return view('laporan.index', compact('peminjaman'));
     }
 }
