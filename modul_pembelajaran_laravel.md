@@ -1,125 +1,209 @@
-# Modul Pembelajaran: Aplikasi Perpustakaan Digital (Laravel)
+# Modul Pembelajaran Komprehensif: Aplikasi Perpustakaan Digital (Laravel)
 
-Modul ini disusun khusus untuk membantu Anda memahami alur kerja dan struktur kode dari **Aplikasi Perpustakaan Digital**. Pembelajaran ini mencakup analisis dari struktur Database hingga tampilan Antarmuka (Blade Template). Bahasa yang digunakan dibuat mudah dipahami bagi siapa saja yang baru belajar Laravel.
-
----
-
-## 1. Konsep Database (Migrations)
-
-Database adalah pondasi dari aplikasi ini. Laravel menggunakan file `Migration` (terdapat di folder `database/migrations`) untuk merancang dan membuat tabel di database secara otomatis tanpa harus membuka aplikasi database manajemen.
-
-> [!NOTE] 
-> Struktur _Primary Key_ pada aplikasi ini sedikit unik. Aplikasinya menggunakan format kustom seperti `UserID` dan `BukuID` dibandingkan format default Laravel yang hanya bernama `id`.
-
-**Struktur Tabel Utama meliputi:**
-- **`users`**: Tabel pengguna dengan fitur tingkat hak akses pengguna (Role) yang dibagi menjadi: `administrator`, `petugas`, dan `peminjam`.
-- **`buku`**: Menyimpan pendataan koleksi buku (Judul, Penulis, Penerbit, Tahun Terbit).
-- **`kategoribuku` & `kategoribuku_relasi`**: Tabel untuk mengelompokkan buku berdasarkan kategorinya (Relasi Many-to-Many).
-- **`peminjaman`**: Jantung dari aplikasi ini. Mencatat seluruh transaksi peminjaman seperti buku apa yang dipinjam (`BukuID`), siapa yang meminjam (`UserID`), kapan batas akhirnya (`TanggalPengembalian`), hingga kejelasan `StatusPeminjaman`.
+Modul ini disusun untuk membedah kode sumber dari **Aplikasi Perpustakaan Digital**. Mulai dari rancangan Database hingga logika Tampilan, setiap sintaks akan dibahas baris demi baris agar mudah dipahami, baik bagi pemula maupun lanjutan.
 
 ---
 
-## 2. Model & Relasi (Eloquent ORM)
+## 1. Database (Migrations)
 
-Model (direktori `app/Models`) berfungsi sebagai perwakilan cerdas untuk berinteraksi dengan database. Melalui Model, kita tidak perlu lagi repot menuliskan syntax *query SQL* murni yang panjang.
+File Migration (`database/migrations/...`) adalah cetak biru (blueprint) untuk membangun tabel database. Kita tidak perlu membuat tabel satu per satu lewat aplikasi seperti phpMyAdmin, cukup melalui kode PHP ini.
 
-Contoh pembedahan pada `app/Models/Buku.php`:
+### Contoh Sintaks: Tabel `buku` & Tabel `peminjaman`
+
 ```php
-class Buku extends Model {
-    protected $table = 'buku';       // Mengatur nama mutlak tabel di database
-    protected $primaryKey = 'BukuID';// Mengubah standar "id" menjadi "BukuID"
-    
-    // Kolom apa saja yang diizinkan untuk diisi secara paksa/masal?
-    protected $fillable = ['Judul', 'Penulis', 'Penerbit', 'TahunTerbit'];
-    
-    // Konfigurasi Relasi (Satu buku -> bisa dipinjam berkali-kali)
-    public function peminjaman() {
+// File: 2026_03_12_004904_create_digital_library_tables.php
+
+public function up(): void
+{    
+    // 1. Membuat tabel 'buku' biasa
+    Schema::create('buku', function (Blueprint $table) {
+        $table->id('BukuID');              // Membuat kolom Primary Key dengan nama khusus "BukuID"
+        $table->string('Judul');           // Kolom teks pendek (Varchar) untuk Judul
+        $table->integer('TahunTerbit');    // Kolom angka bulat untuk Tahun Terbit
+        $table->timestamps();              // Otomatis membuat 2 kolom: created_at & updated_at
+    });
+
+    // 2. Membuat tabel 'peminjaman' sebagai anak/relasi dari tabel 'buku'
+    Schema::create('peminjaman', function (Blueprint $table) {
+        $table->id('PeminjamanID');
+        
+        // Relasi (Foreign Key) yang merujuk ke 'UserID' di tabel 'users'. 
+        // cascade = jika user dihapus, riwayat peminjamannya otomatis ikut terhapus.
+        $table->foreignId('UserID')->constrained('users', 'UserID')->onDelete('cascade');
+        $table->foreignId('BukuID')->constrained('buku', 'BukuID')->onDelete('cascade');
+        
+        $table->date('TanggalPeminjaman'); // Kolom tipe Tanggal (YYYY-MM-DD)
+        $table->string('StatusPeminjaman');
+        $table->timestamps();
+    });
+}
+```
+
+**Penjelasan Sintaks:**
+- `Schema::create`: Perintah ke database untuk membuat sebuah tabel baru.
+- `Blueprint $table`: Kerangka struktur kolom. Anda menambahkan kolom dengan memanggil variable `$table` ini.
+- `constrained()`: Perintah ampuh pembentuk "Foreign Key". Kita memaksa kolom ini agar isinya harus tersambung dengan tabel targetnya.
+
+---
+
+## 2. Models (Penghubung Database)
+
+Model (`app/Models`) berperan sebagai perwakilan masing-masing Tabel. Dengan model, kita bisa menggunakan **Eloquent ORM**, di mana kita memanggil database layaknya objek PHP biasa tanpa mengetik SQL (`SELECT * FROM...`).
+
+### Contoh Sintaks: `Buku.php`
+
+```php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class Buku extends Model
+{
+    // 1. Konfigurasi Dasar
+    protected $table = 'buku';         // (Opsional) Mengikat model ke tabel "buku"
+    protected $primaryKey = 'BukuID';  // PENTING! Beritahu Laravel kalau ID kita bukan 'id', tapi 'BukuID'
+
+    // 2. Izin Pengisian Masal
+    protected $fillable = [
+        'Judul', 'Penulis', 'Penerbit', 'TahunTerbit'
+    ]; // Kolom-kolom ini wajib didaftarkan agar bisa disisipkan data sekaligus (Mass Assignment)
+
+    // 3. Konfigurasi Relasi "HasMany" (Satu Ke Banyak)
+    public function peminjaman()
+    {
+        // "Buku ini bisa punya BANYAK riwayat peminjaman"
+        // Target: Model Peminjaman. Disambungkan melalui kolom 'BukuID'.
         return $this->hasMany(Peminjaman::class, 'BukuID', 'BukuID');
     }
 }
 ```
-**Konsep Penting:**
-Pemanggilan sintaks seperti `hasMany()` (Memiliki Banyak) dan `belongsToMany()` (Bagian Dari Banyak) memudahkan kita saat ingin memanggil rincian peminjaman beserta seluruh judul bukunya dalam satu perintah singkat.
+
+**Penjelasan Sintaks:**
+- `$fillable`: Lapisan Keamanan. Laravel menolak mengisi data secara "rombongan" tanpa izin dari variabel ini (melindungi dari *Mass-Assignment Vulnerability*).
 
 ---
 
-## 3. Sistem Keamanan & Satpam Aplikasi (Middleware)
+## 3. Jalur Aplikasi (Routes)
 
-Middleware (direktori `app/Http/Middleware`) bertugas seperti satpam gedung yang mencegat pengunjung sebelum mereka bisa masuk ke sebuah halaman web.
+Routes (`routes/web.php`) adalah pintu gerbang aplikasi. Ia mengatur saat pengunjung mengetik URL tertentu / klik tombol apa, sistem harus merespon dengan alat apa.
 
-Pada `RoleMiddleware.php`:
-- Pos Pemeriksaan 1: Memastikan pengunjung harus **Login** terlebih dahulu (`auth()->check()`).
-- Pos Pemeriksaan 2: Memeriksa tingkat Role dari pengunjung (`administrator`, `petugas`, atau `peminjam`).
-- Keputusan: Jika level hak akses ternyata tidak diizinkan melintasi jalur ini, pengunjung langsung dialihkan ke Halaman `403 Unauthorized` (Anda tidak memiliki akses).
-
----
-
-## 4. Jalur Peta Situs (Routes)
-
-Route menentukan URL (Tautan/Link) apa yang harus dihubungkan dengan halaman/fitur apa. Sistem Route diletakkan sebagai peta pusat di `routes/web.php`.
+### Contoh Sintaks: Pengelompokan & Hak Akses
 
 ```php
+// Menggunakan 'middleware' untuk memastikan yg masuk hanyalah org yang sudah login
 Route::middleware(['auth'])->group(function () {
-    // Fitur Manajemen Buku: Diperuntukkan hanya bagi Administrator & Petugas
+    
+    // Group untuk Hak Akses Khusus: Hanya Administrator dan Petugas
     Route::middleware(['role:administrator,petugas'])->group(function () {
-        Route::resource('buku', BukuController::class);
+        // resource() = Jalan pintas membuat 7 URL sekaligus (index, create, store, edit, update, destroy)
+        Route::resource('buku', BukuController::class)->except(['show']);
     });
 
-    // Fitur Peminjaman Asli: Spesifik hanya untuk Role Peminjam (User)
+    // Group untuk Hak Akses Khusus: Hanya bagi User Biasa (Peminjam)
     Route::middleware(['role:peminjam'])->group(function () {
-        Route::get('/pinjam', [PeminjamanController::class, 'index']);
+        // [NamaController::class, 'NamaFungsi']
+        Route::post('/pinjam/{buku}', [PeminjamanController::class, 'store'])->name('peminjaman.store');
     });
+
 });
 ```
-**Penjelasan:**
-Aplikasi ini membungkus seluruh tautan aplikasinya dalam _selimut perlindungan_ Autentikasi (`auth`). Jika seseorang berhasil lewat selimut itu, mereka akan masuk ke jalur khusus sesuai level jabatannya.
+
+**Penjelasan Sintaks:**
+- `middleware([...])`: Memanggil Satpam "auth" dan "role".
+- `Route::post`: Metode spesifik untuk menerima "Kirim Data dari Form" ke server. 
+- `{buku}`: Parameter dinamis di URL (Misal url akan berubah menjadi: `/pinjam/45`). Nilai `45` ini akan dikirim ke Controller.
+- `->name(...)`: Memberi julukan unik ke rute ini. Nantinya di file HTML, kita cukup memanggil julukannya daripada menulis URL panjangnya.
 
 ---
 
-## 5. Pengendali Logika (Controllers)
+## 4. Pengendali Logika (Controllers)
 
-Controller (direktori `app/Http/Controllers`) menjadi otak penengah (bridging) antara Permintaan Pengguna, Model (Database), dan Blade (Tampilan).
+Controllers (`app/Http/Controllers/...`) adalah Otak aplikasi. Menerima data dari Route, mengolahnya ke Model, lalu melemparkan hasilnya ke Tampilan (Blade).
 
-### A. `BukuController` (Mengurus Data Katalog)
-Dipakai oleh pengurus perpustakaan merawat buku. Jika menambah buku, Controller bertugas memastikan isiannya tidak boleh nakal (Validasi):
+### Contoh Sintaks: Menyimpan & Menambah Buku Baru (BukuController.php)
+
 ```php
-$request->validate([
-    'Judul' => 'required',
-    // Tidak boleh kosong dan format harus berupa angka real
-    'TahunTerbit' => 'required|integer', 
-]);
+use App\Models\Buku;
+use Illuminate\Http\Request;
+
+class BukuController extends Controller
+{
+    // Fungsi 'store' dipicu oleh Route dari form pendaftaran buku baru
+    public function store(Request $request)
+    {
+        // 1. PROSES VALIDASI
+        // $request berisi seluruh data ketikan (input) form dari pengunjung
+        $request->validate([
+            'Judul' => 'required',             // Wajib diisi!
+            'TahunTerbit' => 'required|integer'// Wajib diisi dan harus berupa angka!
+        ]);
+
+        // 2. PROSES INSERT DATABASE
+        // Menanam data ke tabel mengandalkan model 'Buku'
+        Buku::create($request->all());
+
+        // 3. PROSES HALUAN / REDIRECT
+        // Melempar pengunjung kembali ke halaman daftar buku membawa "Pesan Sukses"
+        return redirect()->route('buku.index')->with('success', 'Buku berhasil ditambahkan.');
+    }
+}
 ```
 
-### B. `PeminjamanController` (Logika Bisnis Transaksi Transisi)
-Mengawal alur peminjaman yang pintar:
-1. **Meminjam Buku**: Mencatat tanggal peminjaman dan secara mandiri menetapkan tanggal pengembalian `7 Hari ke depan` secara otomatis menggunakan penanggalan dari sistem lokal (Modul *Carbon*). Status akan tertulis *'Dipinjam'*.
-2. **Saat Ingin Mengembalikan**: Pengguna menekan tombol kembalikan -> Status berubah sementara menjadi *'Menunggu Pengembalian'*.
-3. **Validasi Fisik Admin**: Admin memastikan fisik buku kembali baik, kemudian menyetujuinya -> Status final berubah menjadi *'Dikembalikan'* dengan stempel waktu detik tersebut.
+**Penjelasan Sintaks:**
+- `Request $request`: Alat penangkap data _Post/Get_ (misal text dari form `input name="Judul"` akan tertangkap oleh alat ini menjadi `$request->Judul`).
+- `$request->validate([...])`:  Akan langsung otomatis menggagalkan proses dan mengembalikan pengguna ke halaman sebelumnya dengan memunculkan pesan _Error_ berwarna merah jika aturan tidak terpenuhi.
+- `Buku::create(...)`: Query SQL cerdas tanpa `INSERT INTO`. Langsung menyimpan array ke basis data.
 
 ---
 
-## 6. Antarmuka Pengguna (Blade Templates)
+## 5. Tampilan (Blade Templates)
 
-Blade adalah mesin canggih pembuat antarmuka dari Laravel. Terletak di palet artis `resources/views`.
+Blade (`resources/views/...`) adalah alat canggih membuat HTML yang interaktif dengan membubuhkan simbol `@` (Directives). 
 
-### Contoh pembedahan file `dashboard.blade.php`:
-1. **Pewarisan Desain (Extends Layout)**:
-   Baris paling atas memakai `@extends('layouts.app')` yang berarti halaman dashboard hanya fokus mengembangkan apa isi content-nya, sedangkan kepala/Navigation Bar sudah otomatis dipinjam dari kerangka utama.
-   
-2. **Logika Kondisi Visual (Directives)**:
-   File Tampilan Blade memahami kode seakan ia hidup:
-   ```html
-   @if(in_array(auth()->user()->Role, ['administrator', 'petugas']))
-       <a href="/buku/create">TOMBOL Admin: Tambah Buku</a>
-   @else
-       <a href="/peminjaman">TOMBOL Member: Pinjam Buku Disini</a>
-   @endif
-   ```
-   **Keistimewaan**: Interface akan _berubah wujud_ (Responsive & Dynamic User Interface) untuk peranan berbeda padahal file aplikasinya tidak berubah dan hanya file itu saja saturnya.
+### Contoh Sintaks: `resources/views/buku/index.blade.php`
 
-3. **Data Dinamis (Data Seeding)**:
-   Perhitungan asli dari database bisa ditanam ke layar secara instan: `{{ \App\Models\Buku::count() }}`. Tulisan ini di layar pengunjung tidak terlihat sebagai kode, melainkan berubah menjadi jumlah murni seperti *"145"*.
+```html
+<!-- 1. Pewarisan: Ambil wajah / template utama dari file 'layouts/app.blade.php' -->
+@extends('layouts.app')
 
-> [!TIP]
-> **Dimana Saya Harus Memulai Modifikasi Program Ini?**
-> Jika ingin menambah sebuah halaman baru, mulailah dengan siklus fundamental Laravel: (1) Buat *URL Route*-nya di `routes/web.php` 👉 (2) Ciptakan *Method* logic-nya di `Controller` 👉 (3) Design halamannya dengan `nama.blade.php`.
+<!-- 2. Isi Area Content yang bolong pada template 'layouts/app.blade.php' -->
+@section('content')
+
+    <!-- Mencetak Link berdasarkan URL Julukan tadi -->
+    <a href="{{ route('buku.create') }}">Tambah Buku</a>
+    
+    <table>
+        <tbody>
+            <!-- 3. Perulangan Logika Blade (Mirip foreach di PHP) -->
+            <!-- $buku diterima dari BukuController `view('buku.index', compact('buku'))` -->
+            @foreach($buku as $item)
+            <tr>
+                <!-- $loop->iteration otomatis mencetak angka 1, 2, 3 berurutan -->
+                <td>{{ $loop->iteration }}</td>
+                <!-- $item->Judul memanggil data dari tabel Database -->
+                <td>{{ $item->Judul }}</td>
+                
+                <td>
+                    <!-- Link ubah. Contoh hasil URL: /buku/15/edit -->
+                    <a href="{{ route('buku.edit', $item->BukuID) }}">Ubah</a>
+                    
+                    <!-- 4. Form Penghapusan Data (Fitur Keamanan CSRF) -->
+                    <!-- Karena HTML hanya tahu GET dan POST, kita akali dengan '@method' -->
+                    <form action="{{ route('buku.destroy', $item->BukuID) }}" method="POST">
+                        @csrf 
+                        @method('DELETE')
+                        <button type="submit">Hapus</button>
+                    </form>
+                </td>
+            </tr>
+            @endforeach
+        </tbody>
+    </table>
+
+@endsection
+```
+
+**Penjelasan Sintaks:**
+- `{{ ... }}`: Ini sama halnya dengan `<?php echo ...; ?>`. Mencetak data dan menangkal serangan XSS secara otomatis.
+- `@foreach ... @endforeach`: Mengulang *block HTML* sejumlah data yang ada ditarik dari tabel. Jika ada 10 buku, maka `<tr>` (baris tabel) otomatis tergandakan jadi 10 kali.
+- `@method('DELETE')` : Membantu Laravel mengizinkan lalu lintas Route penghapusan data dengan aman.
+- `@csrf`: **Sangat krusial untuk Form**. Menempatkan token kunci rahasia ke dalam form. Tanpa `@csrf`, form `POST` mana pun di Laravel akan memunculkan halaman error *419 Page Expired* untuk mencegah peretasan (Cross-Site Request Forgery).
